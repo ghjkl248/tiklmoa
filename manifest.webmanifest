@@ -1,0 +1,16 @@
+{
+  "name": "티끌모아 태산",
+  "short_name": "티끌모아",
+  "description": "내 소비를 주식으로 바꿨다면 1년 뒤 얼마가 될까? 소비를 돌아보는 가상 투자 기록 앱",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#1f8f62",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f7f4">
+  <meta name="description" content="내 소비를 주식으로 바꿨다면 1년 뒤 얼마가 될까? 소비를 돌아보는 가상 투자 기록 앱">
+  <title>티끌모아 태산</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="티끌모아">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="brand">
+        <span class="logo">⛰️</span>
+        <div>
+          <div class="brand-name">티끌모아 태산</div>
+          <div class="brand-sub" id="dataBadge">샘플 시세</div>
+        </div>
+      </div>
+      <button class="icon-btn" id="btnSettings" aria-label="설정">⚙️</button>
+    </header>
+
+    <main id="view"></main>
+
+    <button class="fab" id="btnAdd">＋ 소비 기록</button>
+
+    <nav class="tabs">
+      <button data-tab="home" class="on"><span>🏠</span>홈</button>
+      <button data-tab="history"><span>🧾</span>기록</button>
+      <button data-tab="holdings"><span>📈</span>내 주식</button>
+      <button data-tab="reflect"><span>🔭</span>1년 뒤</button>
+    </nav>
+  </div>
+
+  <!-- 소비 기록 시트 -->
+  <div class="sheet-bg" id="sheetBg" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="sheet-head">
+        <div class="seg">
+          <button data-mode="manual" class="on">직접 입력</button>
+          <button data-mode="card">카드 알림 붙여넣기</button>
+        </div>
+        <button class="icon-btn" id="btnClose" aria-label="닫기">✕</button>
+      </div>
+      <h2 id="sheetTitle" class="sr">소비 기록</h2>
+      <div id="sheetBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="js/universe.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
