@@ -71,6 +71,15 @@
   <script src="js/engine.js"></script>
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
+  <!-- 익명 방문 통계 (GoatCounter, 쿠키 없음). 공개 주소에서만 집계 -->
+  <script>
+    if (location.hostname.endsWith('github.io')) {
+      const s = document.createElement('script');
+      s.async = true; s.src = 'https://gc.zgo.at/count.js';
+      s.dataset.goatcounter = 'https://tiklmoa.goatcounter.com/count';
+      document.body.appendChild(s);
+    }
+  </script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       navigator.serviceWorker.register('sw.js').catch(() => {});
