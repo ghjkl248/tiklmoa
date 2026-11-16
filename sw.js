@@ -1,6 +1,6 @@
 // 오프라인 지원: 앱 화면 파일은 캐시, 시세·뉴스 등 외부 요청은 항상 네트워크
 // 같은 출처 파일은 네트워크 우선이라 수정 사항이 바로 반영됨. 파일 목록을 바꾸면 VERSION을 올릴 것
-const VERSION = 'tiklmoa-v1';
+const VERSION = 'tiklmoa-v2';
 const SHELL = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/universe.js', 'js/engine.js', 'js/store.js', 'js/app.js',
@@ -18,7 +18,7 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return; // 외부 API는 관여하지 않음
   // 같은 출처: 네트워크 우선, 실패하면 캐시 (새 버전이 바로 보이도록)
   e.respondWith(
-    fetch(e.request).then(res => {
+    fetch(e.request, { cache: 'no-cache' }).then(res => { // 서버에 새 버전이 있는지 항상 확인
       const copy = res.clone();
       caches.open(VERSION).then(c => c.put(e.request, copy));
       return res;
