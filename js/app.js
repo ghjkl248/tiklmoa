@@ -178,7 +178,7 @@
   // ── 홈 ──
   function renderHome() {
     const lots = T.state.expenses;
-    if (!lots.length) { view.innerHTML = emptyState('아직 기록이 없어요') + newsCard(); loadNews(); return; }
+    if (!lots.length) { view.innerHTML = envBanner() + emptyState('아직 기록이 없어요') + newsCard(); loadNews(); return; }
     const s = T.summary(lots), p = pct(s.value, s.invested);
     const today = T.todayStr(), monthKey = today.slice(0, 7);
     const todaySpent = lots.filter(l => l.date === today).reduce((a, l) => a + l.amount, 0);
@@ -187,7 +187,7 @@
     // 가장 많이 쓴 카테고리 → 한 줄 성찰
     const topCat = Object.values(s.byCat).sort((a, b) => b.invested - a.invested)[0];
     const tc = topCat && T.catById[topCat.category];
-    view.innerHTML = `
+    view.innerHTML = envBanner() + `
       <section class="card hero">
         <div class="label">지금까지 쓴 돈으로 주식을 샀다면</div>
         <div class="big num">${won(s.value)}</div>
@@ -313,13 +313,22 @@
         <input class="text-input" id="sKey" placeholder="Finnhub API 키" value="${esc(st.finnhubKey)}" autocomplete="off">
         <div style="display:flex;gap:8px;margin-top:10px"><button class="btn sm" id="sFetch">시세 불러오기</button></div>
       </section>
+      <section class="card"><h3>기록 보관·백업</h3>
+        <p class="small muted" style="margin-top:-4px">기록은 이 기기의 <b>${T.env.inApp ? '앱 안 브라우저(카카오톡 등)' : T.env.standalone ? '홈 화면 앱' : '브라우저'}</b>에 저장돼요.
+          ${T.persisted ? '브라우저에 영구 보관을 요청해 두었어요.' : ''} 매일 자동 백업을 14일치 보관해요.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn ghost sm" id="sExport">백업 파일 저장</button>
+          <button class="btn ghost sm" id="sImport">백업 파일 불러오기</button>
+          <input type="file" id="sImportFile" accept=".json,application/json" hidden>
+        </div>
+        <div id="snapList" style="margin-top:12px"><span class="tiny muted">자동 백업 확인 중…</span></div>
+      </section>
       <section class="card"><h3>데이터</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn ghost sm" data-act="demo">예시 데이터 추가</button>
-          <button class="btn ghost sm" id="sExport">백업 파일 저장</button>
           <button class="btn ghost sm" id="sReset" style="color:var(--up)">모든 기록 지우기</button>
         </div>
-        <p class="tiny muted" style="margin-top:10px">기록은 이 브라우저에만 저장돼요.</p>
+        <p class="tiny muted" style="margin-top:10px">지우기 전에 자동으로 백업해 두므로, 실수로 지워도 위 자동 백업에서 되살릴 수 있어요.</p>
       </section>
       ${notice()}`;
     $('#sDefault').onchange = e => { st.defaultTicker = e.target.value; T.save(); toast('기본 종목: ' + e.target.value); };
@@ -332,13 +341,63 @@
     $('#sFx').onchange = e => { st.fxManual = Number(e.target.value.replace(/[^\d.]/g, '')) || 1450; T.save(); };
     $('#sKey').onchange = e => { st.finnhubKey = e.target.value.trim(); T.save(); };
     $('#sFetch').onclick = () => refreshLive(true);
-    $('#sExport').onclick = () => {
+    $('#sExport').onclick = async () => {
+      const name = `티끌모아태산_백업_${T.todayStr()}.json`;
       const blob = new Blob([JSON.stringify(T.state, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `티끌모아태산_${T.todayStr()}.json`; a.click();
+      try { // 휴대폰: 공유 창(카카오톡 나에게 보내기, 파일 저장 등)
+        const file = new File([blob], name, { type: 'application/json' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: '티끌모아태산 백업' }); return; }
+      } catch (e) { if (e && e.name === 'AbortError') return; }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
     };
-    $('#sReset').onclick = () => {
-      if (confirm('모든 소비 기록을 지울까요? 되돌릴 수 없어요.')) { T.state.expenses = []; T.save(); toast('모두 지웠어요'); }
+    $('#sImport').onclick = () => $('#sImportFile').click();
+    $('#sImportFile').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const n = T.importBackup(JSON.parse(await f.text()));
+        toast(n ? `기록 ${n}건을 불러왔어요` : '새로 추가할 기록이 없어요');
+        if (n) go('home');
+      } catch (err) { toast(err.message || '파일을 읽지 못했어요'); }
+      e.target.value = '';
     };
+    $('#sReset').onclick = async () => {
+      if (confirm('모든 소비 기록을 지울까요?\n(지우기 전 상태는 자동 백업에 남아요)')) { await T.resetAll(); toast('모두 지웠어요'); renderSettings(); }
+    };
+    renderSnapshots();
+  }
+
+  async function renderSnapshots() {
+    const box = $('#snapList'); if (!box) return;
+    const snaps = await T.listSnapshots();
+    if (!$('#snapList')) return;
+    if (!snaps.length) { box.innerHTML = '<span class="tiny muted">아직 자동 백업이 없어요. 기록을 추가하면 생겨요.</span>'; return; }
+    box.innerHTML = `<div class="small" style="font-weight:700;margin-bottom:4px">자동 백업</div><ul class="list">${snaps.map(s => {
+      const d = new Date(s.at);
+      return `<li class="item" style="padding:8px 0"><div class="mid"><b class="small">${mdKo(s.date)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</b>
+        <span class="tiny muted">${esc(s.label)} · 기록 ${s.count}건</span></div>
+        <button class="btn ghost sm" data-restore="${esc(s.at)}">복원</button></li>`;
+    }).join('')}</ul>`;
+    box.querySelectorAll('[data-restore]').forEach(b => b.onclick = async () => {
+      if (!confirm('이 백업 시점으로 되돌릴까요?\n(지금 상태도 백업해 둬요)')) return;
+      const n = await T.restoreSnapshot(b.dataset.restore);
+      toast(`기록 ${n}건으로 복원했어요`); go('home');
+    });
+  }
+
+  // 기록이 지워지기 쉬운 환경 안내 (카카오톡 안 브라우저, 아이폰 사파리)
+  function envBanner() {
+    if (T.env.inApp) {
+      const open = T.env.kakao ? `<a class="btn sm" style="display:inline-block;text-decoration:none;margin-top:8px" href="kakaotalk://web/openExternal?url=${encodeURIComponent(location.origin + location.pathname)}">브라우저로 열기</a>` : '';
+      return `<section class="card warn"><b>⚠️ ${T.env.kakao ? '카카오톡' : '앱'} 안에서 열었어요</b>
+        <p class="small" style="margin:4px 0 0">여기서 기록하면 나중에 지워질 수 있어요. 사파리·크롬으로 열어 홈 화면에 추가해서 써 주세요.</p>${open}</section>`;
+    }
+    let hidden = false; try { hidden = localStorage.getItem('tiklmoa.hideIosTip') === '1'; } catch (e) {}
+    if (T.env.ios && !T.env.standalone && !hidden) {
+      return `<section class="card warn"><div class="row"><b>📌 홈 화면에 추가해서 쓰세요</b><button class="del" data-act="hideTip">닫기</button></div>
+        <p class="small" style="margin:4px 0 0">아이폰 사파리는 한동안 열지 않으면 기록을 지울 수 있어요. 공유 버튼 → <b>홈 화면에 추가</b>.<br>
+        <span class="muted">사파리와 홈 화면 앱의 기록은 따로 저장돼요. 옮길 땐 설정의 백업 파일을 이용하세요.</span></p></section>`;
+    }
+    return '';
   }
 
   function notice() {
@@ -466,6 +525,7 @@
     const del = e.target.closest('[data-del]');
     if (del) { if (confirm('이 기록을 지울까요?')) { T.removeExpense(del.dataset.del); render(); } return; }
     const g = e.target.closest('[data-go]'); if (g) { go(g.dataset.go); return; }
+    if (e.target.closest('[data-act="hideTip"]')) { try { localStorage.setItem('tiklmoa.hideIosTip', '1'); } catch (er) {} render(); return; }
     const a = e.target.closest('[data-act="demo"]');
     if (a) { T.seedDemo(); toast('최근 4개월 예시 소비를 넣었어요'); go('home'); }
   });
@@ -474,6 +534,10 @@
   T.load();
   T.loadLiveCache();
   render();
+  T.recover().then(n => {
+    if (n) { render(); toast(`보관해 둔 기록 ${n}건을 되살렸어요`); }
+    else if (tab === 'settings') renderSettings();
+  });
   const fromUrl = T.readUrlExpense();
   if (fromUrl) {
     history.replaceState(null, '', location.pathname);

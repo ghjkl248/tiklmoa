@@ -185,9 +185,11 @@ window.T = window.T || {};
     return res;
   };
   // ── 미국 증시 주요 뉴스 ──
-  // Google 뉴스(한국어) '미국 증시' 검색의 주요 기사 순서(구글이 매긴 중요도·관련도) 상위 n건.
-  // 브라우저에서 RSS를 직접 못 읽기 때문에 rss2json 변환 서비스를 거침. 실패 시 Finnhub(키 있을 때, 영문) 사용.
-  const NEWS_KEY = 'tiklmoa.news', NEWS_TTL = 30 * 60 * 1000;
+  // 1순위 언론사 RSS(연합뉴스·한국경제) → 2순위 Google 뉴스 → 3순위 Finnhub(키 있을 때, 영문).
+  // 브라우저에서 RSS를 직접 못 읽기 때문에 rss2json 변환 서비스를 거침.
+  // Google 뉴스 링크는 구글 중계 주소라 일부 기기·기사에서 열리지 않아 원문 링크를 우선함.
+  const NEWS_KEY = 'tiklmoa.news2', NEWS_TTL = 30 * 60 * 1000;
+  try { localStorage.removeItem('tiklmoa.news'); } catch (e) {}
   T.NEWS_MORE = 'https://news.google.com/search?q=' + encodeURIComponent('미국 증시') + '&hl=ko&gl=KR&ceid=KR:ko';
   T.fetchNews = async function (force) {
     if (!force) {
@@ -196,16 +198,39 @@ window.T = window.T || {};
         if (c && Date.now() - c.at < NEWS_TTL && c.items.length) return c.items;
       } catch (e) {}
     }
+    const unent = s => { try { return new DOMParser().parseFromString(s || '', 'text/html').documentElement.textContent; } catch (e) { return s || ''; } };
     let items = [];
-    for (const when of ['1d', '3d']) {
+    // 1순위: 언론사 RSS(원문 링크가 바로 열림). 미국 증시 관련 제목만 골라 중요도·최신순
+    const FEEDS = [
+      ['연합뉴스', 'https://www.yna.co.kr/rss/market.xml'],
+      ['한국경제', 'https://www.hankyung.com/feed/finance'],
+      ['한국경제', 'https://www.hankyung.com/feed/international'],
+      ['연합뉴스', 'https://www.yna.co.kr/rss/international.xml'],
+    ];
+    const STRONG = /뉴욕증시|뉴욕 증시|미국 증시|미 증시|미국증시|월가|나스닥|S&P|다우|미국 주식|미국주식|서학개미/;
+    const WEAK = /연준|Fed|파월|엔비디아|테슬라|애플|마이크로소프트|아마존|알파벳|메타|브로드컴|빅테크|M7|국채금리|ETF/;
+    const res = await Promise.all(FEEDS.map(async ([src, u]) => {
+      try {
+        const j = await (await fetch('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(u))).json();
+        return (j.items || []).map(i => ({ title: unent(i.title).trim(), source: src, url: i.link, time: Date.parse(i.pubDate.replace(' ', 'T') + 'Z') }));
+      } catch (e) { return []; }
+    }));
+    const seen = new Set(), dayAgo = Date.now() - 36 * 3600 * 1000;
+    items = res.flat()
+      .filter(i => i.url && /^https:\/\//.test(i.url) && i.time > dayAgo && (STRONG.test(i.title) || WEAK.test(i.title)))
+      .filter(i => { const k = i.title.slice(0, 18); if (seen.has(k) || seen.has(i.url)) return false; seen.add(k); seen.add(i.url); return true; })
+      .map(i => ({ ...i, score: (STRONG.test(i.title) ? 2 : 1) }))
+      .sort((a, b) => b.score - a.score || b.time - a.time);
+    // 2순위: Google 뉴스 (링크가 구글 중계 주소라 일부 환경에서 열리지 않을 수 있음)
+    if (items.length < 2) for (const when of ['1d', '3d']) {
       try {
         const rss = 'https://news.google.com/rss/search?q=' + encodeURIComponent('미국 증시 when:' + when) + '&hl=ko&gl=KR&ceid=KR:ko';
         const r = await fetch('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rss));
         const j = await r.json();
-        items = (j.items || []).map(i => {
+        items = items.concat((j.items || []).map(i => {
           const m = i.title.match(/^(.*)\s-\s([^-]+)$/);
           return { title: m ? m[1].trim() : i.title, source: m ? m[2].trim() : '', url: i.link, time: Date.parse(i.pubDate.replace(' ', 'T') + 'Z') };
-        });
+        }));
         if (items.length >= 2) break;
       } catch (e) {}
     }
@@ -213,7 +238,7 @@ window.T = window.T || {};
       try {
         const r = await fetch('https://finnhub.io/api/v1/news?category=general&token=' + encodeURIComponent(T.state.settings.finnhubKey));
         const j = await r.json();
-        items = (j || []).map(i => ({ title: i.headline, source: i.source, url: i.url, time: i.datetime * 1000 }));
+        items = items.concat((j || []).map(i => ({ title: i.headline, source: i.source, url: i.url, time: i.datetime * 1000 })));
       } catch (e) {}
     }
     items = items.filter(i => i.title && i.url).slice(0, 2);

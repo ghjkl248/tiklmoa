@@ -16,12 +16,109 @@ window.T = window.T || {};
     },
   };
 
+  const normalize = s => s ? { ...DEFAULT, ...s, expenses: Array.isArray(s.expenses) ? s.expenses : [], settings: { ...DEFAULT.settings, ...(s.settings || {}) } } : JSON.parse(JSON.stringify(DEFAULT));
+
   T.load = function () {
     let s = null;
     try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
-    T.state = s ? { ...DEFAULT, ...s, settings: { ...DEFAULT.settings, ...(s.settings || {}) } } : JSON.parse(JSON.stringify(DEFAULT));
+    T.state = normalize(s);
   };
-  T.save = function () { try { localStorage.setItem(KEY, JSON.stringify(T.state)); } catch (e) {} };
+
+  // ── 기록 보호 ──
+  // 1) localStorage + IndexedDB 이중 저장  2) 날짜별 자동 백업 14개 보관
+  // 3) 브라우저에 '지우지 말아 달라'(persistent storage) 요청  4) 초기화·복원 직전에도 백업
+  const DB = 'tiklmoa', ST = 'kv', SNAP_MAX = 14;
+  let dbp = null;
+  function db() {
+    if (!dbp) dbp = new Promise((res, rej) => {
+      if (!window.indexedDB) return rej(new Error('no idb'));
+      const r = indexedDB.open(DB, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(ST);
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    return dbp;
+  }
+  async function idbGet(k) {
+    const d = await db();
+    return new Promise((res, rej) => { const q = d.transaction(ST).objectStore(ST).get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  }
+  async function idbSet(k, v) {
+    const d = await db();
+    return new Promise((res, rej) => { const t = d.transaction(ST, 'readwrite'); t.objectStore(ST).put(v, k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
+  }
+  const clone = o => JSON.parse(JSON.stringify(o));
+
+  T.snapshot = async function (label) {
+    if (!T.state.expenses.length) return;
+    try {
+      const snaps = (await idbGet('snaps')) || [];
+      const date = T.todayStr();
+      const entry = { date, at: new Date().toISOString(), label: label || '자동 백업', count: T.state.expenses.length, data: clone(T.state) };
+      const i = label ? -1 : snaps.findIndex(s => s.date === date && s.label === '자동 백업');
+      if (i >= 0) snaps[i] = entry; else snaps.push(entry);
+      snaps.sort((a, b) => b.at.localeCompare(a.at));
+      await idbSet('snaps', snaps.slice(0, SNAP_MAX));
+    } catch (e) {}
+  };
+  T.listSnapshots = async function () { try { return (await idbGet('snaps')) || []; } catch (e) { return []; } };
+
+  T.save = function () {
+    try { localStorage.setItem(KEY, JSON.stringify(T.state)); } catch (e) {}
+    idbSet('state', clone(T.state)).catch(() => {});
+    T.snapshot();
+  };
+
+  // 시작 시: localStorage가 비었는데 IndexedDB·자동 백업에 기록이 있으면 되살림
+  T.recover = async function () {
+    try { if (navigator.storage && navigator.storage.persist) T.persisted = await navigator.storage.persist(); } catch (e) {}
+    if (T.state.expenses.length) { T.save(); return 0; }
+    let src = null;
+    try { src = await idbGet('state'); } catch (e) {}
+    if (!src || !src.expenses || !src.expenses.length) {
+      const snaps = await T.listSnapshots();
+      src = snaps.length ? snaps[0].data : null;
+    }
+    if (src && src.expenses && src.expenses.length) {
+      T.state = normalize(src);
+      try { localStorage.setItem(KEY, JSON.stringify(T.state)); } catch (e) {}
+      return T.state.expenses.length;
+    }
+    return 0;
+  };
+
+  T.resetAll = async function () {
+    await T.snapshot('초기화 직전');
+    T.state.expenses = [];
+    try { localStorage.setItem(KEY, JSON.stringify(T.state)); } catch (e) {}
+    try { await idbSet('state', clone(T.state)); } catch (e) {}
+  };
+  T.restoreSnapshot = async function (at) {
+    const s = (await T.listSnapshots()).find(x => x.at === at);
+    if (!s) return 0;
+    await T.snapshot('복원 직전');
+    T.state = normalize(clone(s.data));
+    T.save();
+    return T.state.expenses.length;
+  };
+  // 백업 파일 불러오기: 같은 기록(id)은 건너뛰고 새 기록만 합침
+  T.importBackup = function (obj) {
+    const list = obj && Array.isArray(obj.expenses) ? obj.expenses : null;
+    if (!list) throw new Error('백업 파일 형식이 아니에요');
+    const have = new Set(T.state.expenses.map(e => e.id));
+    const add = list.filter(e => e && e.id && e.date && e.amount && T.bySym[e.ticker] && !have.has(e.id));
+    T.state.expenses.push(...add);
+    T.save();
+    return add.length;
+  };
+
+  // 사용 환경: 카카오톡 등 앱 안 브라우저는 기록이 쉽게 지워짐
+  const ua = navigator.userAgent || '';
+  T.env = {
+    inApp: /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\/|DaumApps|everytimeApp/i.test(ua),
+    kakao: /KAKAOTALK/i.test(ua),
+    ios: /iPhone|iPad|iPod/i.test(ua),
+    standalone: window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches),
+  };
 
   T.tickerFor = function (cat) { return T.state.settings.catTicker[cat] || T.state.settings.defaultTicker; };
 
